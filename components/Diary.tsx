@@ -18,7 +18,6 @@ type Entry = {
 };
 type DaySummary = { day: string; count: number; mood: number | null };
 
-// para no repetir el headers y el try/catch en cada llamada
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -44,8 +43,7 @@ function relativeDay(key: string, today: string) {
 }
 
 export default function Diary({ user }: { user: User }) {
-  // las fechas salen de la zona horaria del navegador, asi que no pinto nada hasta montar
-  // (si no react reclama que el html del server no coincide)
+  // sin esto react se queja de que el html del server no coincide
   const [ready, setReady] = useState(false);
   useEffect(() => setReady(true), []);
 
@@ -60,6 +58,9 @@ export default function Diary({ user }: { user: User }) {
   const [loadingDay, setLoadingDay] = useState(true);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [loadError, setLoadError] = useState("");
+  const [advice, setAdvice] = useState<Record<string, string | null>>({});
+  const [adviceLoading, setAdviceLoading] = useState(false);
+  const [adviceBasedOn, setAdviceBasedOn] = useState<"day" | "recent" | null>(null);
 
   const loadMonth = useCallback(async () => {
     try {
@@ -86,10 +87,9 @@ export default function Diary({ user }: { user: User }) {
   useEffect(() => { loadMonth(); }, [loadMonth]);
   useEffect(() => { loadDay(); setEditingId(null); }, [loadDay]);
 
-  // primero los huecos hasta el dia 1 y despues los dias
   const cells = useMemo(() => {
-    const offset = (month.getDay() + 6) % 7; // getDay() da 0=domingo, con +6 %7 el lunes queda 0
-    const total = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate(); // dia 0 del mes que viene
+    const offset = (month.getDay() + 6) % 7; // lunes = 0
+    const total = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
     const list: (string | null)[] = Array(offset).fill(null);
     for (let d = 1; d <= total; d++) {
       list.push(toKey(new Date(month.getFullYear(), month.getMonth(), d)));
@@ -98,6 +98,28 @@ export default function Diary({ user }: { user: User }) {
   }, [month]);
 
   const daysWritten = Object.keys(summary).length;
+  const avgMood = useMemo(() => {
+    const values = Object.values(summary)
+      .map((d) => d.mood)
+      .filter((m): m is number => m != null);
+    if (!values.length) return null;
+    return Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+  }, [summary]);
+
+  async function askAdvice() {
+    setAdviceLoading(true);
+    try {
+      const data = await api<{ advice: string | null; basedOn: "day" | "recent" | null }>(
+        `/api/advice?day=${selected}`
+      );
+      setAdvice((m) => ({ ...m, [selected]: data.advice }));
+      setAdviceBasedOn(data.basedOn);
+    } catch {
+      setAdvice((m) => ({ ...m, [selected]: null }));
+    } finally {
+      setAdviceLoading(false);
+    }
+  }
 
   function shiftMonth(delta: number) {
     setMonth((m) => new Date(m.getFullYear(), m.getMonth() + delta, 1));
@@ -198,6 +220,12 @@ export default function Diary({ user }: { user: User }) {
               {daysWritten === 0
                 ? "Este mes aún no escribes."
                 : `Escribiste ${daysWritten} ${daysWritten === 1 ? "día" : "días"} este mes.`}
+              {avgMood != null && findMood(avgMood) && (
+                <span className="mood-avg">
+                  <span className="dot" style={{ background: findMood(avgMood)!.color }} />
+                  Promedio: {findMood(avgMood)!.label}
+                </span>
+              )}
             </span>
             {selected !== today && (
               <button className="link" onClick={goToday}>Ir a hoy</button>
@@ -221,13 +249,33 @@ export default function Diary({ user }: { user: User }) {
 
           {!isFuture && (
             <EntryEditor
-              key={selected} // con esto react reinicia el editor al cambiar de dia
+              key={selected} // reinicia el editor al cambiar de dia
               submitLabel="Guardar nota"
               placeholder={
                 entries.length ? "Algo más que quieras apuntar..." : "¿Qué pasó hoy? ¿Cómo te sentiste?"
               }
               onSubmit={createEntry}
             />
+          )}
+
+          {!isFuture && (
+            <div className="advice">
+              {advice[selected] ? (
+                <>
+                  <p className="advice-label">
+                    {adviceBasedOn === "recent" ? "Pensando en tus últimos días" : "Consejo de hoy"}
+                  </p>
+                  <p className="advice-text">{advice[selected]}</p>
+                  <button className="link" onClick={askAdvice} disabled={adviceLoading}>
+                    {adviceLoading ? "Pensando..." : "Pedir otro consejo"}
+                  </button>
+                </>
+              ) : (
+                <button className="link" onClick={askAdvice} disabled={adviceLoading}>
+                  {adviceLoading ? "Pensando..." : "¿Qué me aconsejas hoy?"}
+                </button>
+              )}
+            </div>
           )}
 
           {loadError && <p className="error">{loadError}</p>}

@@ -1,12 +1,12 @@
-import Database from "better-sqlite3"; // Libreria mas usada para sql lite
-import fs from "fs"; // Para gestionar archivos y carpetas
-import path from "path"; // Construir y manipular rutas de archivos
+import Database from "better-sqlite3";
+import fs from "fs";
+import path from "path";
 
 const dir = path.join(process.cwd(), "data");
 
 fs.mkdirSync(dir, { recursive: true });
 
-const g = globalThis as unknown as { db?: Database.Database };  // globalThis es el objeto global abosulto, maso maso
+const g = globalThis as unknown as { db?: Database.Database };
 
 export const db = g.db ?? new Database(path.join(dir, "diario.db"));
 
